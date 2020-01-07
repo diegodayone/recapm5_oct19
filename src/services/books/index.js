@@ -51,11 +51,13 @@ bookRouter.get("/:id", async (req, res)=>{
         res.status(404).send("NOT FOUND")
 })
 
+const validCategories = ["High Fantasy", "scifi", "fantasy", "romance", "bio"]
 bookRouter.post("/",
     [   check("asin").isLength({min: 10, max:10}).withMessage("Hey man, the ASIN should have 10 chars"),
         check("name").isString({ min: 3}).withMessage("The name should have at least 3 chars"), 
         check("price").isNumeric().withMessage("Only numeric values are accepted"),
-        check("category").isString(),
+        check("category").custom(val => validCategories.includes(val)).withMessage("Only High Fantasy, scifi, fantasy, romance & bio are allowed" ),
+        check("img").custom(val => /^(http:\/\/www\.|https:\/\/www\.|http:\/\/|https:\/\/)?[a-z0-9]+([\-\.]{1}[a-z0-9]+)*\.[a-z]{2,5}(:[0-9]{1,5})?(\/.*)?$/.test(val)),
         sanitizeBody("price").toFloat()],
      async(req,res)=>{
     //req.body = undefined? you should use server.use(express.json()) in your server file
@@ -73,6 +75,31 @@ bookRouter.post("/",
     // update... etc
     // user that created the entry
     await fs.writeFile(fileLocation, JSON.stringify(books))
+    res.send(req.body)
+})
+
+bookRouter.post("/total", multerConfig.single("bookCover"),
+[   check("asin").isLength({min: 10, max:10}).withMessage("Hey man, the ASIN should have 10 chars"),
+check("name").isString({ min: 3}).withMessage("The name should have at least 3 chars"), 
+check("price").isNumeric().withMessage("Only numeric values are accepted"),
+check("category").custom(val => validCategories.includes(val)).withMessage("Only High Fantasy, scifi, fantasy, romance & bio are allowed" ),
+sanitizeBody("price").toFloat()],
+async (req, res)=> {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) { //is there any validation error? if so, return the error message
+        return res.status(422).json({ errors: errors.array() });
+    }
+    //saving the file in the images folder
+    const fileName = req.body.asin + path.extname(req.file.originalname) //create a new filename like ASIN.ext
+    const newImageLocation = path.join(__dirname, "../../../images", fileName); //create the path to my images folder
+    await fs.writeFile(newImageLocation, req.file.buffer) //write down the image on the folder
+
+    req.body.img = req.protocol + '://' + req.get('host') + "/images/" + fileName; //update the book object
+    //book.img = "http://localhost:4000/images/1231231230.jpg; 
+    const books = await readBooks(); //get the list of books
+    books.push(req.body) //adding the books
+    await fs.writeFile(fileLocation, JSON.stringify(books))
+
     res.send(req.body)
 })
 
@@ -99,6 +126,38 @@ bookRouter.post("/:asin", multerConfig.single("bookCover"), async (req, res)=>{
     })
 })
 
+bookRouter.put("/:asin", async (req, res)=>{
+    const books = await readBooks();
+    const book = books.find(b => b.asin === req.params.asin) //search for a book with a given asin
+    if (!book)
+        return res.status(404).send("NOT FOUND")
+
+    //=> prevents the user to modify the asin for a given book.
+    delete req.body.asin
+
+    for (let key in req.body) { //update every field we see into the req.body
+        console.log("I'm updating the property " + key + " and setting it to " + req.body[key])
+        book[key] = req.body[key]
+    }
+
+    await fs.writeFile(fileLocation, JSON.stringify(books));
+    res.send(book)
+})
+
+bookRouter.delete("/:asin", async (req, res)=>{
+    //read the books
+    const books = await readBooks()
+    //find all the others book
+    const notToDelete = books.filter(b => b.asin !== req.params.asin)
+    //if the number of found books == initial number ==> book is not there
+    if (notToDelete.length === books.length)
+        return res.status(404).send("Not found")
+    //else save the books in order to remove it
+    else{
+        await fs.writeFile(fileLocation, JSON.stringify(notToDelete))
+        res.send("DELETED")
+    }
+})
 
 module.exports = bookRouter;
 
